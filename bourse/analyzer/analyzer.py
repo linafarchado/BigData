@@ -41,6 +41,8 @@ def first_clean(df_combined):
             if "(c)" in str(row["last"]):
                 df_combined.loc[index, "last"] = row["last"][:-3]
 
+    return df_combined
+
 def clean_data(df):
     df = df.drop_duplicates()
     df = df.dropna()
