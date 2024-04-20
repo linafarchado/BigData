@@ -9,32 +9,7 @@ import timescaledb_model as tsdb
 db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'db', 'monmdp')        # inside docker
 #db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'localhost', 'monmdp') # outside docker
 
-def load_specific_date(spec):
-    year = spec.split("-")[0]
-    folder_path = "/home/bourse/data/boursorama/" + year + "/"
-
-    file_paths = []
-
-    for filename in os.listdir(folder_path):
-    # Check if filename contains the desired date
-        if spec in filename:
-            # Construct the full path
-            file_path = os.path.join(folder_path, filename)
-            file_paths.append(file_path)
-
-    data_frames = []
-    for file_path in file_paths:
-    # Read the CSV file into a DataFrame
-        df = store_file(file_path, "boursorama")
-
-        if df is not None:
-            data_frames.append(df)
-
-    # Combine all DataFrames into a single DataFrame (optional)
-    df_combined = pd.concat(data_frames, ignore_index=True)
-    return df_combined
-
-def first_clean(df):
+def clean_c(df):
     grouped_df = df.groupby("name")
 
     for name, group_df in grouped_df:
@@ -45,7 +20,7 @@ def first_clean(df):
 
     return df
 
-def second_clean(df):
+def clean_s(df):
     grouped_df = df.groupby("name")
 
     for name, group_df in grouped_df:
@@ -56,7 +31,7 @@ def second_clean(df):
 
     return df
 
-def third_clean(df):
+def clean_1r(df):
     grouped_df = df.groupby("name")
 
     for name, group_df in grouped_df:
@@ -67,55 +42,129 @@ def third_clean(df):
 
     return df
 
-def add_to_database(df):
-    #for row in df.itertuples():
-        #last = float(str(row.last).replace(" ", ""))  # Convert last to float
-        #volume = int(str(row.volume).replace(" ", ""))  # Convert volume to int
-
-        #db.execute(f"INSERT INTO stocks (date, value, volume) VALUES ('{row.date}', {last}, {volume});")
-        #if (not db.raw_query("SELECT EXISTS (SELECT * FROM file_done);")[0][0]):
-            #db.execute(f"INSERT INTO file_done (name) VALUES ('{row.name}');")
-
-    print("Starting to write")
-    db.df_write(df[["filename"]], "file_done", if_exists="replace")
-    print("Done writing")
-
-    return None
-
 def clean_data(df):
-    df = df.drop_duplicates()
-    df = df.dropna()
+    df1 = df.drop_duplicates()
+    df2 = df1.dropna()
 
-    return df
+    df3 = clean_c(df2)
+    df4 = clean_s(df3)
+    df5 = clean_1r(df4)
+
+    return df5
+
+# Add the data to the companies table
+def add_companies(df):
+    # Remove all duplicates in the name
+    unique_names_df = df.drop_duplicates(subset=['name']).reset_index()
+
+    comp_df = pd.DataFrame({
+        "name": unique_names_df["name"].copy(),
+        "mid": unique_names_df.index,
+        "symbol": unique_names_df["symbol"].copy(),
+        "symbol_nf": None,
+        "isin": None,
+        "reuters": None,
+        "boursorama": None,
+        "pea": None,
+        "sector": None
+    })
+
+    db.execute("ALTER SEQUENCE company_id_seq RESTART WITH 1", commit=True)
+    db.df_write(comp_df, "companies", index=False, if_exists="replace")
+
+# Add the data to the stocks table
+def add_stocks(df):
+    stocks_df = pd.DataFrame({
+        "date": df["date"].copy(),
+        "cid": None,
+        "value": df["last"].copy(),
+        "volume": df["volume"].copy(),
+    })
+
+    db.df_write(stocks_df, "stocks", index=False, if_exists="replace")
+
+# Add the data to the daystocks table
+def add_daystocks(df):
+    daystocks_df = pd.DataFrame({
+        "date": df["date"].copy(),
+        "cid": None,
+        "open": df["last"].copy(),
+        "close": df["last"].copy(),
+        "high": df["last"].copy(),
+        "low": df["last"].copy(),
+        "volume": df["volume"].copy()
+    })
+
+    db.df_write(daystocks_df, "daystocks", index=False, if_exists="replace")
+
+# Add the data to the file_done table
+def add_file_done(df):
+    filedone_df = pd.DataFrame({
+        "name": df["filename"].unique().copy()
+    })
+
+    db.df_write(filedone_df, "file_done", index=False, if_exists="replace")
+
+# Er add everyting to the database
+def add_to_database(df):
+    add_companies(df)
+    add_daystocks(df)
+    add_stocks(df)
+    add_file_done(df)
 
 def store_file(name, website):
+    # If the file was already added to the Database, skip it
     if db.is_file_done(name):
-        print(db.is_file_done(name))
+        print(f"The file {name} has already been added before")
         return None
     
+    # Else we add read and clean it
     if website.lower() == "boursorama":
-        #print(name)
-
         df = pd.read_pickle(name)
-        df['date'] = name.split(" ")[1] + " " + name.split(" ")[2].split(".")[0]
-        df['filename'] = name
+        df['date'] = name.split(" ")[1] + " " + name.split(" ")[2].split(".")[0] # We add the date
+        df['filename'] = name # We add the file_name
 
-        df2 = first_clean(df)
-        df3 = second_clean(df2)
-        df4 = third_clean(df3)
-        df_final = clean_data(df4)
+        df_final = clean_data(df)
 
         return df_final
+    
+def load_specific_date(spec):
+    year = spec.split("-")[0]
+    folder_path = "/home/bourse/data/boursorama/" + year + "/"
+
+    file_paths = []
+
+    # Check through all the folder
+    for filename in os.listdir(folder_path):
+
+    # Check if filename contains the desired date
+        if spec in filename:
+
+            # Construct the full path
+            file_path = os.path.join(folder_path, filename)
+            file_paths.append(file_path)
+
+    data_frames = []
+    for file_path in file_paths:
+
+    # Read the CSV file into a DataFrame
+        df = store_file(file_path, "boursorama")
+        if df is not None:
+            data_frames.append(df)
+
+    # Combine all DataFrames into a single DataFrame (optional)
+    if (len(data_frames) == 0):
+        return None
+    return pd.concat(data_frames, ignore_index=True)
+    
+def fill_database():
+    # Later will be changed to loading all the datas
+    df = load_specific_date("2020-01-01")
+
+    # Add the dataframe to the Database
+    if (df is not None):
+        add_to_database(df)
 
 if __name__ == '__main__':
-    # df = load_specific_date("2022-12-01")
-    df = store_file("/home/bourse/data/boursorama/" + "2020" + "/" + "compA 2020-01-01 09:02:02.532411.bz2", "boursorama")
-
-    print(df)
-    add_to_database(df)
-
-    # add all names of dataframe into 
-    #db.df_write(df[["symbol"]], "companies", index=False)
-
-    #print(df)
+    fill_database()
     print("Done")
