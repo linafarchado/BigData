@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
-import sklearn
-
+from fetch import preprocess_boursorama_data
 import os
 
 import timescaledb_model as tsdb
@@ -175,15 +174,16 @@ def load_specific_date(spec):
     # Combine all DataFrames into a single DataFrame (optional)
     if (len(data_frames) == 0):
         return None
-    return pd.concat(data_frames, ignore_index=True)
+    return preprocess_boursorama_data(pd.concat(data_frames, ignore_index=True))
     
 def fill_database():
     # Later will be changed to loading all the datas
-    df = load_specific_date("2020-01-01 14:52")
+    df = load_specific_date("2019-01-01 09:05")
+    print(df)
 
     # Add the dataframe to the Database
-    if (df is not None):
-        add_to_database(df)
+    #if (df is not None):
+    #    add_to_database(df)
 
 if __name__ == '__main__':
     fill_database()
