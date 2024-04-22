@@ -62,6 +62,7 @@ def add_stocks(df, comp_dict):
     logging.debug(f'In add_stocks')
 
     df['id'] = df['symbol'].apply(lambda x: comp_dict.get(x))
+    df['last'] = df['last'].str.replace(' ', '', regex=True)
 
     stocks_df = pd.DataFrame({
         "date": df["date"].copy(),
@@ -79,6 +80,7 @@ def add_daystocks(df, comp_dict):
     logging.debug(f'In add_daystocks')
 
     df['id'] = df['symbol'].apply(lambda x: comp_dict.get(x))
+    df['last'] = df['last'].str.replace(' ', '', regex=True)
 
     daystocks_df = pd.DataFrame({
         "date": df["date"].copy(),
