@@ -54,6 +54,12 @@ def clean_data(df):
 
 # Add the data to the companies table
 def add_companies(df):
+    db_df = db.execute("SELECT name, symbol FROM companies")
+    if len(db_df) > 0:
+        db_df = pd.DataFrame(db_df, columns=["name", "symbol"])
+        df = df.set_index('name')
+        df = pd.merge(df, db_df, on='name', how='inner').rename(columns={'symbol_y': 'symbol'})
+
     # Remove all duplicates in the name
     unique_names_df = df.drop_duplicates(subset=['symbol']).reset_index()
 
@@ -77,6 +83,7 @@ def add_companies(df):
 # Add the data to the stocks table
 def add_stocks(df, comp_dict):
     df['id'] = df['symbol'].apply(lambda x: comp_dict.get(x))
+    df['last'] = df['last'].str.replace(' ', '', regex=True)
 
     stocks_df = pd.DataFrame({
         "date": df["date"].copy(),
@@ -85,13 +92,14 @@ def add_stocks(df, comp_dict):
         "volume": df["volume"].copy(),
     })
 
-    db.df_write(stocks_df, "stocks", index=False, if_exists="replace")
+    db.df_write(stocks_df, "stocks", index=False, if_exists="append")
 
     return stocks_df
 
 # Add the data to the daystocks table
 def add_daystocks(df, comp_dict):
     df['id'] = df['symbol'].apply(lambda x: comp_dict.get(x))
+    df['last'] = df['last'].str.replace(' ', '', regex=True)
 
     daystocks_df = pd.DataFrame({
         "date": df["date"].copy(),
@@ -103,7 +111,7 @@ def add_daystocks(df, comp_dict):
         "volume": df["volume"].copy()
     })
 
-    db.df_write(daystocks_df, "daystocks", index=False, if_exists="replace")
+    db.df_write(daystocks_df, "daystocks", index=False, if_exists="append")
 
     return daystocks_df
 
@@ -113,7 +121,7 @@ def add_file_done(df):
         "name": df["filename"].unique().copy()
     })
 
-    db.df_write(filedone_df, "file_done", index=False, if_exists="replace")
+    db.df_write(filedone_df, "file_done", index=False, if_exists="append")
 
     return filedone_df
 
@@ -124,18 +132,18 @@ def make_companies_dict(df):
 
 # Er add everyting to the database
 def add_to_database(df):
-    comp_df = add_companies(df)
+    comp_df = add_companies(df.copy())
 
     comp_dict = make_companies_dict(comp_df)
 
     add_daystocks(df.copy(), comp_dict)
     add_stocks(df.copy(), comp_dict)
-    add_file_done(df)
+    add_file_done(df.copy())
 
 def store_file(name, website):
     # If the file was already added to the Database, skip it
     if db.is_file_done(name):
-        print(f"The file {name} has already been added before")
+    #    print(f"The file {name} has already been added before")
         return None
     
     # Else we add read and clean it
@@ -179,7 +187,7 @@ def load_specific_date(spec):
     
 def fill_database():
     # Later will be changed to loading all the datas
-    df = load_specific_date("2020-01-01 14:52")
+    df = load_specific_date("2020-01-0")
 
     # Add the dataframe to the Database
     if (df is not None):
