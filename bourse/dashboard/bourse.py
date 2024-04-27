@@ -4,6 +4,7 @@ from dash import html
 import dash.dependencies as ddep
 import pandas as pd
 import sqlalchemy
+import logging
 
 from datetime import date, timedelta
 import plotly.graph_objects as go
@@ -17,6 +18,7 @@ engine = sqlalchemy.create_engine(DATABASE_URI)
 
 app = dash.Dash(__name__,  title="Bourse", suppress_callback_exceptions=True) # , external_stylesheets=external_stylesheets)
 server = app.server
+logging.basicConfig(level=logging.DEBUG)
 app.layout = html.Div([
 
                 html.Label('Multi-Select Company Dropdown'),
@@ -49,7 +51,13 @@ app.layout = html.Div([
                     labelStyle={'display': 'inline-block', 'marginTop': '5px'}
                 ),
 
-                dcc.Graph(id='stock-prices-graph'),  # Add a graph component
+                dcc.Graph(id='stock-prices-graph'),
+
+                dcc.Dropdown(
+                    id='company-to-display',
+                    value=None
+                ), 
+                html.Div(id='raw-data-table', style={'width': '100%', 'overflow-x': 'scroll'}),
 
                 dcc.Textarea(
                     id='sql-query',
@@ -79,18 +87,26 @@ def update_dropdown_options(n_clicks):
     return []  # Return an empty list initially
 
 @app.callback(
-    ddep.Output('stock-prices-graph', 'figure'),  # Update graph figure
-    ddep.Input('company-dropdown', 'value'),  # Trigger on dropdown change and radio button change
-    ddep.Input('crossfilter-xaxis-type', 'value'),  # Additional trigger for radio buttons
-    ddep.Input('date-picker-range', 'start_date'),  # New input for start date
-    ddep.Input('date-picker-range', 'end_date'), # New input for end date
-    ddep.Input('graph-type', 'value') # New input for graph type selection
+    [
+        ddep.Output('stock-prices-graph', 'figure'),
+        ddep.Output('raw-data-table', 'children'),
+        ddep.Output('company-to-display', 'options')
+    ],
+    [
+        ddep.Input('company-dropdown', 'value'),
+        ddep.Input('crossfilter-xaxis-type', 'value'),
+        ddep.Input('date-picker-range', 'start_date'),
+        ddep.Input('date-picker-range', 'end_date'),
+        ddep.Input('graph-type', 'value'),
+        ddep.Input('company-to-display', 'value')
+    ]
 )
-def update_stock_prices_graph(selected_companies, yaxis_type, start_date, end_date, graph_type):
+def update_stock_prices_graph(selected_companies, yaxis_type, start_date, end_date, graph_type, company_to_display):
     if selected_companies:
-        try:
+        # try:
             # Assuming your "stocks" table has "date" and "value" columns
-            stock_data = []
+            stock_data, table_data = [], []
+            dropdown_options = [{'label': company, 'value': company} for company in selected_companies]
 
             for company in selected_companies:
                 query = f"SELECT date, value FROM stocks WHERE cid = (SELECT mid FROM companies WHERE symbol = '{company}')"
@@ -101,10 +117,33 @@ def update_stock_prices_graph(selected_companies, yaxis_type, start_date, end_da
 
                 if not company_df.empty:  # Check if data exists for the company
                     company_df = company_df.sort_values(by='date')  # Sort by date
+                    daystocks_df = daystocks_df.sort_values(by='date')
 
                     if start_date and end_date:
                         company_df = company_df[company_df['date'] >= start_date]
                         company_df = company_df[company_df['date'] <= end_date]
+
+                    if company_to_display == company:
+                        # Calculate daily min, max, mean, std, first, and last values
+                        daily_stats = company_df.resample('D', on='date').agg({
+                            'value': ['min', 'max', 'mean', 'std'],
+                            'date': ['first', 'last']
+                        }).reset_index()
+
+                        daily_stats.columns = [company, 'Min', 'Max', 'Mean', 'Std', 'First', 'Last']
+
+                        # Round mean and std columns to 5th decimal place
+                        daily_stats['Mean'] = daily_stats['Mean'].apply(lambda x: round(x, 5))
+                        daily_stats['Std'] = daily_stats['Std'].apply(lambda x: round(x, 5))
+
+                        table_data.append(html.Table(
+                        # Define table headers and rows
+                        children=[
+                            html.Tr([html.Th(col) for col in daily_stats.columns])
+                        ] + [
+                            html.Tr([html.Td(val) for val in row]) for _, row in daily_stats.iterrows()
+                        ]
+                        ))
 
                     if graph_type == 'Candlestick':
                         fig = go.Figure(go.Candlestick(
@@ -115,7 +154,7 @@ def update_stock_prices_graph(selected_companies, yaxis_type, start_date, end_da
                             close=daystocks_df['close']
                         ))
 
-                        return fig
+                        return fig, table_data, dropdown_options
                         #stock_data.append(fig)  # Append the entire figure for the company
                        
                     else:
@@ -134,10 +173,11 @@ def update_stock_prices_graph(selected_companies, yaxis_type, start_date, end_da
 
             # Set xaxis type based on radio button selection
             #figure.update_yaxes(type='linear' if yaxis_type == 'Linear' else 'log')
-            return figure
-        except Exception as e:
-            return {'data': []}  # Return empty data in case of errors
-    return {}  # Return empty figure initially
+            return figure, table_data, dropdown_options
+        # except Exception as e:
+        #     print(f"An error occurred: {e}")  # Print the exception details
+        #     return (), []
+    return {}, [], {}  # Return empty figure initially
 
 @app.callback( ddep.Output('query-result', 'children'),
                ddep.Input('execute-query', 'n_clicks'),
