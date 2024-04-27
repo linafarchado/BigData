@@ -8,36 +8,14 @@ import timescaledb_model as tsdb
 db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'db', 'monmdp')        # inside docker
 #db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'localhost', 'monmdp') # outside docker
 
-def clean_c(df):
+def clean_c_s(df):
     grouped_df = df.groupby("name")
 
     for name, group_df in grouped_df:
         
         for index, row in group_df.iterrows():
-            if "(c)" in str(row["last"]):
+            if "(c)" in str(row["last"]) or "(s)" in str(row["last"]):
                 df.loc[index, "last"] = row["last"][:-3]
-
-    return df
-
-def clean_s(df):
-    grouped_df = df.groupby("name")
-
-    for name, group_df in grouped_df:
-        
-        for index, row in group_df.iterrows():
-            if "(s)" in str(row["last"]):
-                df.loc[index, "last"] = row["last"][:-3]
-
-    return df
-
-def clean_1r(df):
-    grouped_df = df.groupby("name")
-
-    for name, group_df in grouped_df:
-        
-        for index, row in group_df.iterrows():
-            if "1r" in str(row["symbol"]):
-                df.loc[index, "symbol"] = row["symbol"][2:]
 
     return df
 
@@ -45,11 +23,7 @@ def clean_data(df):
     df1 = df.drop_duplicates()
     df2 = df1.dropna()
 
-    df3 = clean_c(df2)
-    df4 = clean_s(df3)
-    #df5 = clean_1r(df4)
-
-    return df4
+    return clean_c_s(df2)
 
 # Add the data to the companies table
 def add_companies(df):
@@ -95,10 +69,10 @@ def add_daystocks(df, comp_dict):
     daystocks_df = pd.DataFrame({
         "date": df["date"].copy(),
         "cid": df["id"].copy(),
-        "open": df["last"].copy(),
-        "close": df["last"].copy(),
-        "high": df["last"].copy(),
-        "low": df["last"].copy(),
+        "open": df["open"].copy(),
+        "close": df["close"].copy(),
+        "high": df["high"].copy(),
+        "low": df["low"].copy(),
         "volume": df["volume"].copy()
     })
 
@@ -147,44 +121,31 @@ def store_file(name, website):
 
         return df_final
     
-def load_specific_date(spec):
-    year = spec.split("-")[0]
-    folder_path = "/home/bourse/data/boursorama/" + year + "/"
-
-    file_paths = []
-
-    # Check through all the folder
-    for filename in os.listdir(folder_path):
-
-    # Check if filename contains the desired date
-        if spec in filename:
-
-            # Construct the full path
-            file_path = os.path.join(folder_path, filename)
-            file_paths.append(file_path)
-
+def load_all_files_in_folder(folder_path):
     data_frames = []
-    for file_path in file_paths:
-
-    # Read the CSV file into a DataFrame
+    for filename in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, filename)
+        # Read the CSV file into a DataFrame
         df = store_file(file_path, "boursorama")
         if df is not None:
             data_frames.append(df)
-
-    # Combine all DataFrames into a single DataFrame (optional)
-    if (len(data_frames) == 0):
+    
+    # Combine all DataFrames into a single DataFrame
+    if len(data_frames) == 0:
         return None
     return preprocess_boursorama_data(pd.concat(data_frames, ignore_index=True))
-    
+
 def fill_database():
     # Later will be changed to loading all the datas
-    df = load_specific_date("2019-01-01 09:05")
-    print(df)
-
-    # Add the dataframe to the Database
-    #if (df is not None):
-    #    add_to_database(df)
+    df = load_all_files_in_folder("/home/bourse/data/boursorama/2019/")
+    
+    if (df is not None):
+        add_to_database(df)
 
 if __name__ == '__main__':
-    fill_database()
-    print("Done")
+    db.execute('DELETE FROM file_done')
+    db.execute('DELETE FROM daystocks')
+    db.execute('DELETE FROM stocks')
+    db.execute('DELETE FROM companies')
+    #fill_database()
+    #print("Done")
