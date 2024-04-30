@@ -25,6 +25,7 @@ RUN cp /usr/share/zoneinfo/Europe/Paris /etc/localtime && \
 
 RUN adduser --disabled-password --gecos "" bourse
 RUN chmod 755 /home/bourse
+RUN pip install yfinance
 
 USER bourse
 WORKDIR /home/bourse

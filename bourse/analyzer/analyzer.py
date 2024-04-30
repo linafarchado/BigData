@@ -1,44 +1,24 @@
 import pandas as pd
 import numpy as np
-import sklearn
-
 import os
-
+import dask.dataframe as dd
 import timescaledb_model as tsdb
+import logging
+from multiprocessing import Pool, cpu_count
+from tqdm import tqdm
 
 db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'db', 'monmdp')        # inside docker
 #db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'localhost', 'monmdp') # outside docker
 
-def clean_c(df):
+logging.basicConfig(level=logging.DEBUG)
+
+def clean_c_s(df):
     grouped_df = df.groupby("name")
 
     for name, group_df in grouped_df:
-        
         for index, row in group_df.iterrows():
-            if "(c)" in str(row["last"]):
+            if "(c)" in str(row["last"]) or "(s)" in str(row["last"]):
                 df.loc[index, "last"] = row["last"][:-3]
-
-    return df
-
-def clean_s(df):
-    grouped_df = df.groupby("name")
-
-    for name, group_df in grouped_df:
-        
-        for index, row in group_df.iterrows():
-            if "(s)" in str(row["last"]):
-                df.loc[index, "last"] = row["last"][:-3]
-
-    return df
-
-def clean_1r(df):
-    grouped_df = df.groupby("name")
-
-    for name, group_df in grouped_df:
-        
-        for index, row in group_df.iterrows():
-            if "1r" in str(row["symbol"]):
-                df.loc[index, "symbol"] = row["symbol"][2:]
 
     return df
 
@@ -46,19 +26,11 @@ def clean_data(df):
     df1 = df.drop_duplicates()
     df2 = df1.dropna()
 
-    df3 = clean_c(df2)
-    df4 = clean_s(df3)
-    #df5 = clean_1r(df4)
-
-    return df4
+    return clean_c_s(df2)
 
 # Add the data to the companies table
 def add_companies(df):
-    db_df = db.execute("SELECT name, symbol FROM companies")
-    if len(db_df) > 0:
-        db_df = pd.DataFrame(db_df, columns=["name", "symbol"])
-        df = df.set_index('name')
-        df = pd.merge(df, db_df, on='name', how='inner').rename(columns={'symbol_y': 'symbol'})
+    logging.debug(f'In add_companies')
 
     # Remove all duplicates in the name
     unique_names_df = df.drop_duplicates(subset=['symbol']).reset_index()
@@ -76,12 +48,14 @@ def add_companies(df):
     })
 
     db.execute("ALTER SEQUENCE company_id_seq RESTART WITH 1", commit=True)
-    db.df_write(comp_df, "companies", index=False, if_exists="replace")
+    db.df_write(comp_df, "companies", index=False, if_exists="replace", commit=True)
 
     return comp_df
 
 # Add the data to the stocks table
 def add_stocks(df, comp_dict):
+    logging.debug(f'In add_stocks')
+
     df['id'] = df['symbol'].apply(lambda x: comp_dict.get(x))
     df['last'] = df['last'].str.replace(' ', '', regex=True)
 
@@ -92,12 +66,14 @@ def add_stocks(df, comp_dict):
         "volume": df["volume"].copy(),
     })
 
-    db.df_write(stocks_df, "stocks", index=False, if_exists="append")
+    db.df_write(stocks_df, "stocks", index=False, if_exists="replace", commit=True)
 
     return stocks_df
 
 # Add the data to the daystocks table
 def add_daystocks(df, comp_dict):
+    logging.debug(f'In add_daystocks')
+
     df['id'] = df['symbol'].apply(lambda x: comp_dict.get(x))
     df['last'] = df['last'].str.replace(' ', '', regex=True)
 
@@ -111,17 +87,19 @@ def add_daystocks(df, comp_dict):
         "volume": df["volume"].copy()
     })
 
-    db.df_write(daystocks_df, "daystocks", index=False, if_exists="append")
+    db.df_write(daystocks_df, "daystocks", index=False, if_exists="replace", commit=True)
 
     return daystocks_df
 
 # Add the data to the file_done table
 def add_file_done(df):
+    logging.debug(f'In add_file_done')
+
     filedone_df = pd.DataFrame({
         "name": df["filename"].unique().copy()
     })
 
-    db.df_write(filedone_df, "file_done", index=False, if_exists="append")
+    db.df_write(filedone_df, "file_done", index=False, if_exists="replace", commit=True)
 
     return filedone_df
 
@@ -132,7 +110,9 @@ def make_companies_dict(df):
 
 # Er add everyting to the database
 def add_to_database(df):
-    comp_df = add_companies(df.copy())
+    logging.debug(f'In add_to_database')
+
+    comp_df = add_companies(df)
 
     comp_dict = make_companies_dict(comp_df)
 
@@ -140,59 +120,62 @@ def add_to_database(df):
     add_stocks(df.copy(), comp_dict)
     add_file_done(df.copy())
 
-def store_file(name, website):
+def store_file(name):
+    #logging.debug(f'In store_file')
+
+
     # If the file was already added to the Database, skip it
-    if db.is_file_done(name):
-    #    print(f"The file {name} has already been added before")
-        return None
+    """ if db.is_file_done(name):
+        print(f"The file {name} has already been added before")
+        return None"""
     
     # Else we add read and clean it
-    if website.lower() == "boursorama":
-        df = pd.read_pickle(name)
-        df['date'] = name.split(" ")[1] + " " + name.split(" ")[2].split(".")[0] # We add the date
-        df['filename'] = name # We add the file_name
+    df = pd.read_pickle(name)
+    df['date'] = name.split(" ")[1] + " " + name.split(" ")[2].split(".")[0] # We add the date
+    df['filename'] = name # We add the file_name
 
-        df_final = clean_data(df)
+    df_final = clean_data(df)
 
-        return df_final
+    return df_final
     
-def load_specific_date(spec):
-    year = spec.split("-")[0]
-    folder_path = "/home/bourse/data/boursorama/" + year + "/"
+def run_imap_unordered_multiprocessing(func, argument_list, num_processes):
 
+    pool = Pool(processes=num_processes)
+
+    cpt = 0
+
+    result_list_tqdm = []
+    for result in tqdm(pool.imap_unordered(func=func, iterable=argument_list), total=len(argument_list)):
+        cpt += 1
+        logging.debug(f"Processed file {cpt}")
+        result_list_tqdm.append(result)
+
+    return result_list_tqdm
+
+def load_all_files():
+    logging.debug(f'In load_all_files')
+
+    folder_path = "/home/bourse/data/boursorama/"
     file_paths = []
+    for year_folder in os.listdir(folder_path):
+        year_path = os.path.join(folder_path, year_folder)
+        if os.path.isdir(year_path):
+            file_paths.extend([os.path.join(year_path, file_name) for file_name in os.listdir(year_path) if not db.is_file_done(file_name)])
 
-    # Check through all the folder
-    for filename in os.listdir(folder_path):
+    logging.debug(f"Total number of files to process: {len(file_paths)}")
 
-    # Check if filename contains the desired date
-        if spec in filename:
+    dfs = []
+    num_processes = cpu_count() * 2
+    return run_imap_unordered_multiprocessing(store_file, file_paths, num_processes)
 
-            # Construct the full path
-            file_path = os.path.join(folder_path, filename)
-            file_paths.append(file_path)
-
-    data_frames = []
-    for file_path in file_paths:
-
-    # Read the CSV file into a DataFrame
-        df = store_file(file_path, "boursorama")
-        if df is not None:
-            data_frames.append(df)
-
-    # Combine all DataFrames into a single DataFrame (optional)
-    if (len(data_frames) == 0):
-        return None
-    return pd.concat(data_frames, ignore_index=True)
-    
 def fill_database():
-    # Later will be changed to loading all the datas
-    df = load_specific_date("2020-01-0")
+    logging.debug("In fill_database")
 
-    # Add the dataframe to the Database
-    if (df is not None):
-        add_to_database(df)
+    df = load_all_files()
+    add_to_database(df)
 
 if __name__ == '__main__':
+    logging.debug(f'In MAIN')
+
     fill_database()
     print("Done")
