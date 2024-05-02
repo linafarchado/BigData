@@ -1,11 +1,19 @@
 import pandas as pd
 import numpy as np
 import os
-import dask.dataframe as dd
 import timescaledb_model as tsdb
 import logging
 from multiprocessing import Pool, cpu_count
 from tqdm import tqdm
+
+import dask
+import dask.dataframe as dd
+from dask.diagnostics import ProgressBar
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+
+pool = ProcessPoolExecutor()
+
+dask.config.set(pool=pool)
 
 db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'db', 'monmdp')        # inside docker
 #db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'localhost', 'monmdp') # outside docker
@@ -121,36 +129,25 @@ def add_to_database(df):
     add_file_done(df.copy())
 
 def store_file(name):
-    #logging.debug(f'In store_file')
+    logging.debug(f"File Read: {name}")
+    df = pd.read_pickle(name, compression='bz2')
 
-
-    # If the file was already added to the Database, skip it
-    """ if db.is_file_done(name):
-        print(f"The file {name} has already been added before")
-        return None"""
-    
-    # Else we add read and clean it
-    df = pd.read_pickle(name)
-    df['date'] = name.split(" ")[1] + " " + name.split(" ")[2].split(".")[0] # We add the date
-    df['filename'] = name # We add the file_name
+    df['date'] = name.split(" ")[1] + " " + name.split(" ")[2].split(".")[0]
+    df['filename'] = name
 
     df_final = clean_data(df)
 
     return df_final
     
 def run_imap_unordered_multiprocessing(func, argument_list, num_processes):
+    delayed_reads = []
+    for path in argument_list:
+        delayed_reads.append(dask.delayed(func)(path))
 
-    pool = Pool(processes=num_processes)
+    with ProgressBar():
+        result = dask.compute(*delayed_reads, n_workers=num_processes)
 
-    cpt = 0
-
-    result_list_tqdm = []
-    for result in tqdm(pool.imap_unordered(func=func, iterable=argument_list), total=len(argument_list)):
-        cpt += 1
-        logging.debug(f"Processed file {cpt}")
-        result_list_tqdm.append(result)
-
-    return result_list_tqdm
+    return result
 
 def load_all_files():
     logging.debug(f'In load_all_files')
@@ -165,7 +162,7 @@ def load_all_files():
     logging.debug(f"Total number of files to process: {len(file_paths)}")
 
     dfs = []
-    num_processes = cpu_count() * 2
+    num_processes = cpu_count() // 2
     return run_imap_unordered_multiprocessing(store_file, file_paths, num_processes)
 
 def fill_database():
