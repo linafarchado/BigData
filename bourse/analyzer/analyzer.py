@@ -8,6 +8,15 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import os
 from tqdm import tqdm
 
+import dask
+import dask.dataframe as dd
+from dask.diagnostics import ProgressBar
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+
+pool = ProcessPoolExecutor()
+
+dask.config.set(pool=pool)
+
 db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'db', 'monmdp')        # inside docker
 #db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'localhost', 'monmdp') # outside docker
 
