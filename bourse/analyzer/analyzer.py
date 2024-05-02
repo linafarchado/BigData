@@ -7,9 +7,9 @@ import dask.dataframe as dd
 import timescaledb_model as tsdb
 import logging
 from tqdm import tqdm
-from multiprocessing import Pool, cpu_count
 import dask
 import bz2
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import os
 
 db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'db', 'monmdp')        # inside docker
@@ -130,6 +130,20 @@ def add_to_database(df):
 
     add_file_done(df)
 
+def load_all_files():
+    logging.debug(f'In load_all_files')
+
+    folder_path = "/home/bourse/data/boursorama/"
+    file_paths = []
+    for year_folder in os.listdir(folder_path):
+        year_path = os.path.join(folder_path, year_folder)
+        if os.path.isdir(year_path):
+            file_paths.extend([os.path.join(year_path, file_name) for file_name in os.listdir(year_path) if not db.is_file_done(file_name)])
+
+    logging.debug(f"Total number of files to process: {len(file_paths)}")
+
+    return file_paths
+
 def extract_date_filename(filepath):
     filename = os.path.basename(filepath)
     # Supprimer 'amsterdam' du début de la chaîne
@@ -145,33 +159,23 @@ def load_and_clean_file(path):
         df['filename'] = filename
         return clean_data(df)
 
-def load_all_files():
-    logging.debug(f'In load_all_files')
-
-    folder_path = "/home/bourse/data/boursorama/"
-    file_paths = []
-    for year_folder in os.listdir(folder_path):
-        year_path = os.path.join(folder_path, year_folder)
-        if os.path.isdir(year_path):
-            file_paths.extend([os.path.join(year_path, file_name) for file_name in os.listdir(year_path) if not db.is_file_done(file_name)])
-
-    logging.debug(f"Total number of files to process: {len(file_paths)}")
-
-    return file_paths
-
 def process_file(path):
     df = load_and_clean_file(path)
     add_to_database(df)
     del df
 
+
 def fill_database():
-    logging.debug(f'In fill_database')
     file_paths = load_all_files()
 
-    num_processes = cpu_count()
-    with Pool(processes=num_processes) as pool:
-        with tqdm(total=len(file_paths), desc="Processing files") as pbar:
-            for _ in pool.imap_unordered(process_file, file_paths):
+    logging.debug("Starting to process files")
+    max_workers = os.cpu_count() - 1
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(process_file, path) for path in file_paths]
+
+        with tqdm(total=len(futures), desc="Processing files") as pbar:
+            for future in as_completed(futures):
+                future.result()
                 pbar.update(1)
 
 if __name__ == '__main__':
