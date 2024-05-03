@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 import os
 import timescaledb_model as tsdb
 import logging
@@ -7,11 +6,7 @@ import bz2
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import os
 from tqdm import tqdm
-
-import dask
-import dask.dataframe as dd
-from dask.diagnostics import ProgressBar
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 
 pool = ProcessPoolExecutor()
 
@@ -124,7 +119,7 @@ def make_companies_dict(df):
 
 def add_to_database(df):
     logging.debug(f'In add_to_database')
-    for _, group in df.groupby(df.index // 1000):  # Regroupez les données par lots de 1000 fichiers
+    for _, group in df.groupby(df.index // 1000):
         comp_df = add_companies(group)
         comp_dict = make_companies_dict(comp_df)
         del comp_df
@@ -171,7 +166,6 @@ def process_file(path):
     df = load_and_clean_file(path)
     add_to_database(df)
     del df
-
 
 def fill_database():
     file_paths = load_all_files()
