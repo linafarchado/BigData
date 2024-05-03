@@ -1,16 +1,12 @@
-import dask.distributed
-import dask.threaded
 import pandas as pd
 import numpy as np
 import os
-import dask.dataframe as dd
 import timescaledb_model as tsdb
 import logging
-from tqdm import tqdm
-import dask
 import bz2
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import os
+from tqdm import tqdm
 
 db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'db', 'monmdp')        # inside docker
 #db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'localhost', 'monmdp') # outside docker
@@ -117,18 +113,19 @@ def make_companies_dict(df):
 
 def add_to_database(df):
     logging.debug(f'In add_to_database')
+    for _, group in df.groupby(df.index // 1000):  # Regroupez les données par lots de 1000 fichiers
+        comp_df = add_companies(group)
+        comp_dict = make_companies_dict(comp_df)
+        del comp_df
 
-    comp_df = add_companies(df)
-    comp_dict = make_companies_dict(comp_df)
-    del comp_df 
+        daystocks_df = add_daystocks(group, comp_dict)
+        del daystocks_df
 
-    daystocks_df = add_daystocks(df.copy(), comp_dict)
-    del daystocks_df  # Libérer la mémoire après l'utilisation de daystocks_df
+        stocks_df = add_stocks(group, comp_dict)
+        del stocks_df
 
-    stocks_df = add_stocks(df.copy(), comp_dict)
-    del stocks_df  # Libérer la mémoire après l'utilisation de stocks_df
-
-    add_file_done(df)
+        add_file_done(group)
+        del group
 
 def load_all_files():
     logging.debug(f'In load_all_files')
@@ -169,7 +166,7 @@ def fill_database():
     file_paths = load_all_files()
 
     logging.debug("Starting to process files")
-    max_workers = os.cpu_count() - 1
+    max_workers = os.cpu_count() * 3
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(process_file, path) for path in file_paths]
 

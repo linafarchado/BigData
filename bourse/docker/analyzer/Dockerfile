@@ -25,12 +25,7 @@ RUN cp /usr/share/zoneinfo/Europe/Paris /etc/localtime && \
 
 RUN adduser --disabled-password --gecos "" bourse
 RUN chmod 755 /home/bourse
-RUN pip install dask
-RUN apt-get update && apt-get install -y libpq-dev
-RUN pip install psycopg2-binary
 RUN pip install tqdm
-RUN pip install dask[dataframe]
-RUN pip install "dask[distributed]" --upgrade
 
 USER bourse
 WORKDIR /home/bourse
