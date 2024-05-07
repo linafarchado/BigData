@@ -3,50 +3,51 @@ import numpy as np
 import os
 import timescaledb_model as tsdb
 import logging
-from multiprocessing import Pool, cpu_count
+import bz2
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import os
 from tqdm import tqdm
-
-import dask
-import dask.dataframe as dd
-from dask.diagnostics import ProgressBar
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
-
-pool = ProcessPoolExecutor()
-
-dask.config.set(pool=pool)
+from datetime import datetime
 
 db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'db', 'monmdp')        # inside docker
 #db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'localhost', 'monmdp') # outside docker
 
 logging.basicConfig(level=logging.DEBUG)
+MAX_INT_VALUE = 2147483647
 
 def clean_c_s(df):
-    grouped_df = df.groupby("name")
-
-    for name, group_df in grouped_df:
-        for index, row in group_df.iterrows():
-            if "(c)" in str(row["last"]) or "(s)" in str(row["last"]):
-                df.loc[index, "last"] = row["last"][:-3]
-
+    df['last'] = df['last'].str.replace(r'\((c|s)\)$', '', regex=True)
+    df['last'] = df['last'].str.replace(' ', '')
+    df['last'] = df['last'].astype(float)
     return df
 
 def clean_data(df):
     df1 = df.drop_duplicates()
-    df2 = df1.dropna()
-
+    df2 = df1.dropna(subset=['last', 'volume'])
+    del df1
     return clean_c_s(df2)
+
 
 # Add the data to the companies table
 def add_companies(df):
     logging.debug(f'In add_companies')
 
-    # Remove all duplicates in the name
-    unique_names_df = df.drop_duplicates(subset=['symbol']).reset_index()
+    unique_symbols_df = df.drop_duplicates(subset=['symbol']).reset_index()
+    unique_symbols = set(unique_symbols_df['symbol'])
+
+    existing_symbols = set()
+    # Fetch existing symbols from the database in chunks
+    for chunk in db.df_query("SELECT DISTINCT symbol FROM companies WHERE symbol IN %s", args=(tuple(unique_symbols),), chunksize=10000):
+        existing_symbols.update(chunk['symbol'])
+    index_total = next(db.df_query("SELECT count(*) FROM companies"))['count'][0]
+
+    unique_symbols_df = unique_symbols_df[~unique_symbols_df['symbol'].isin(existing_symbols)].reset_index()
+    unique_symbols_df.index = unique_symbols_df.index + index_total + 1
 
     comp_df = pd.DataFrame({
-        "name": unique_names_df["name"].copy(),
-        "mid": unique_names_df.index,
-        "symbol": unique_names_df["symbol"].copy(),
+        "name": unique_symbols_df["name"].copy(),
+        "mid": unique_symbols_df.index,
+        "symbol": unique_symbols_df["symbol"].copy(),
         "symbol_nf": None,
         "isin": None,
         "reuters": None,
@@ -55,8 +56,9 @@ def add_companies(df):
         "sector": None
     })
 
-    db.execute("ALTER SEQUENCE company_id_seq RESTART WITH 1", commit=True)
-    db.df_write(comp_df, "companies", index=False, if_exists="replace", commit=True)
+    db.df_write(comp_df, "companies", index=False, if_exists="append", commit=True)
+
+    del unique_symbols_df
 
     return comp_df
 
@@ -65,16 +67,15 @@ def add_stocks(df, comp_dict):
     logging.debug(f'In add_stocks')
 
     df['id'] = df['symbol'].apply(lambda x: comp_dict.get(x))
-    df['last'] = df['last'].str.replace(' ', '', regex=True)
 
     stocks_df = pd.DataFrame({
         "date": df["date"].copy(),
-        "cid": df["id"].copy(),
+        "cid": df['id'],
         "value": df["last"].copy(),
         "volume": df["volume"].copy(),
     })
 
-    db.df_write(stocks_df, "stocks", index=False, if_exists="replace", commit=True)
+    db.df_write(stocks_df, "stocks", index=False, if_exists="append", commit=True)
 
     return stocks_df
 
@@ -82,97 +83,162 @@ def add_stocks(df, comp_dict):
 def add_daystocks(df, comp_dict):
     logging.debug(f'In add_daystocks')
 
-    df['id'] = df['symbol'].apply(lambda x: comp_dict.get(x))
-    df['last'] = df['last'].str.replace(' ', '', regex=True)
+    daily_stats = df.resample('D', on='date').agg({
+            'last': ['first', 'last', 'max', 'min'],
+            'date': ['first'],
+            'symbol': ['first'],
+            'volume': ['sum']
+        }).reset_index()
+    
+    daily_stats.columns = ["", 'open', 'close', 'high', 'low', 'date', 'symbol', 'volume']
+
+    daily_stats['id'] = daily_stats['symbol'].apply(lambda x: comp_dict.get(x))
+    daily_stats.dropna(subset=['date'], inplace=True)
 
     daystocks_df = pd.DataFrame({
-        "date": df["date"].copy(),
-        "cid": df["id"].copy(),
-        "open": df["last"].copy(),
-        "close": df["last"].copy(),
-        "high": df["last"].copy(),
-        "low": df["last"].copy(),
-        "volume": df["volume"].copy()
+        "date": daily_stats["date"].copy(),
+        "cid": daily_stats["id"].copy(),
+        "open": daily_stats["open"].copy(),
+        "close": daily_stats["close"].copy(),
+        "high": daily_stats["high"].copy(),
+        "low": daily_stats["low"].copy(),
+        "volume": daily_stats["volume"].copy()
     })
 
-    db.df_write(daystocks_df, "daystocks", index=False, if_exists="replace", commit=True)
+    daystocks_df.loc[daystocks_df['volume'] > MAX_INT_VALUE, 'volume'] = MAX_INT_VALUE
+    # daystocks_df = daystocks_df[daystocks_df['volume'] <= MAX_INT_VALUE]
 
-    return daystocks_df
+    db.df_write(daystocks_df, "daystocks", index=False, if_exists="append", commit=True)
+
+    del daystocks_df
+    del daily_stats
+
+def add_tags(df):
+    logging.debug(f'In add_tags')
+
+    tags_df = pd.DataFrame({
+        "name": df["name"].copy(),
+        "value": df["last"].copy()
+    })
+
+    db.df_write(tags_df, "tags", index=False, if_exists="append", commit=True)
+
+    return tags_df
 
 # Add the data to the file_done table
 def add_file_done(df):
     logging.debug(f'In add_file_done')
 
     filedone_df = pd.DataFrame({
-        "name": df["filename"].unique().copy()
+        "name": df["filename"].unique()
     })
 
-    db.df_write(filedone_df, "file_done", index=False, if_exists="replace", commit=True)
+    db.df_write(filedone_df, "file_done", index=False, if_exists="append", commit=True)
 
     return filedone_df
 
+comp_dict = {}
+
 def make_companies_dict(df):
-    comp_dict = df.set_index('symbol')['mid'].to_dict()
-
-    return comp_dict
-
-# Er add everyting to the database
+    logging.debug(f'In make_companies_dict')
+    comp_dict.update(df.set_index('symbol')['mid'].to_dict())
+    
 def add_to_database(df):
     logging.debug(f'In add_to_database')
 
-    comp_df = add_companies(df)
+    for _, group in df.groupby('filename'):
+        comp_df = add_companies(group)
+        make_companies_dict(comp_df)
+        logging.debug(f"here is the dict: {comp_dict}")
 
-    comp_dict = make_companies_dict(comp_df)
+        stocks_df = add_stocks(group, comp_dict)
+        del stocks_df
+        del comp_df
 
-    add_daystocks(df.copy(), comp_dict)
-    add_stocks(df.copy(), comp_dict)
-    add_file_done(df.copy())
-
-def store_file(name):
-    logging.debug(f"File Read: {name}")
-    df = pd.read_pickle(name, compression='bz2')
-
-    df['date'] = name.split(" ")[1] + " " + name.split(" ")[2].split(".")[0]
-    df['filename'] = name
-
-    df_final = clean_data(df)
-
-    return df_final
+        add_file_done(group)
+        del group
     
-def run_imap_unordered_multiprocessing(func, argument_list, num_processes):
-    delayed_reads = []
-    for path in argument_list:
-        delayed_reads.append(dask.delayed(func)(path))
+    for _, group in df.groupby('symbol'):
+        add_daystocks(group, comp_dict)
 
-    with ProgressBar():
-        result = dask.compute(*delayed_reads, n_workers=num_processes)
 
-    return result
+def extract_date_filename(filepath):
+    filename = os.path.basename(filepath)
+    # Supprimer 'amsterdam' du début de la chaîne
+    date_str = filepath.split(" ")[1] + " " + filepath.split(" ")[2].split(".")[0]
+    return pd.to_datetime(date_str, format='%Y-%m-%d %H:%M:%S'), filename
+
+def load_and_clean_file(path):
+    with bz2.BZ2File(path, 'rb') as file:
+        df = pd.read_pickle(file)
+        df.reset_index(drop=True, inplace=True)
+        date, filename = extract_date_filename(path)
+        df['date'] = date
+        df['filename'] = filename
+        return clean_data(df)
+
+def process_file(path):
+    if (len(path) > 0):
+        df = pd.concat([load_and_clean_file(p) for p in path])
+        add_to_database(df)
+        del df
 
 def load_all_files():
     logging.debug(f'In load_all_files')
 
     folder_path = "/home/bourse/data/boursorama/"
-    file_paths = []
-    for year_folder in os.listdir(folder_path):
+    file_paths_by_year_month = {}
+
+    year_folder = "2020"
+    if True:
+    # year_folder in os.listdir(folder_path):
         year_path = os.path.join(folder_path, year_folder)
+        for i in ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"]:
+            key = year_folder + "-" + i
+            file_paths_by_year_month[key] = []
+
         if os.path.isdir(year_path):
-            file_paths.extend([os.path.join(year_path, file_name) for file_name in os.listdir(year_path) if not db.is_file_done(file_name)])
+            for file_name in os.listdir(year_path):
+                if not db.is_file_done(file_name):
+                    year_month = "-".join(file_name.split()[1].split("-")[:2])  # Extract year-month from file name
+                    file_paths_by_year_month[year_month].append(os.path.join(year_path, file_name))
 
-    logging.debug(f"Total number of files to process: {len(file_paths)}")
+    logging.debug(f"Total number of files to process: {sum(len(files) for files in file_paths_by_year_month.values())}")
 
-    dfs = []
-    num_processes = cpu_count() // 2
-    return run_imap_unordered_multiprocessing(store_file, file_paths, num_processes)
+    return file_paths_by_year_month
+
+def init_comp_dict():
+    df = list(db.df_query("SELECT * FROM companies"))
+    df = pd.concat(df, ignore_index=True)
+    print(df)
+    comp_dict.update(df.set_index('symbol')['mid'].to_dict())
+
 
 def fill_database():
-    logging.debug("In fill_database")
+    file_paths = load_all_files()
 
-    df = load_all_files()
-    add_to_database(df)
+    logging.debug("Starting to process files")
+
+    init_comp_dict()
+
+    for key in tqdm(file_paths, total=len(file_paths), desc="Processing Months"):
+        logging.debug(f"Month to process: {key}")
+        process_file(file_paths[key])
+
+    del file_paths
+
+    # max_workers = os.cpu_count() * 3
+    # with ProcessPoolExecutor(max_workers=max_workers) as executor:
+    #     futures = [executor.submit(process_file, path) for path in file_paths]
+
+    #     with tqdm(total=len(futures), desc="Processing files") as pbar:
+    #         for future in as_completed(futures):
+    #             future.result()
+    #             pbar.update(1)
 
 if __name__ == '__main__':
     logging.debug(f'In MAIN')
 
     fill_database()
+
     print("Done")
