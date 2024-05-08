@@ -12,7 +12,9 @@ from datetime import datetime
 db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'db', 'monmdp')        # inside docker
 #db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'localhost', 'monmdp') # outside docker
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig()
+logging.getLogger('timescaledb_model').setLevel(logging.INFO)
+
 MAX_INT_VALUE = 2147483647
 
 def clean_c_s(df):
@@ -30,7 +32,7 @@ def clean_data(df):
 
 # Add the data to the companies table
 def add_companies(df):
-    logging.debug(f'In add_companies')
+    # print(f'In add_companies')
 
     unique_symbols_df = df.drop_duplicates(subset=['symbol']).reset_index()
     unique_symbols = set(unique_symbols_df['symbol'])
@@ -64,7 +66,7 @@ def add_companies(df):
 
 # Add the data to the stocks table
 def add_stocks(df, comp_dict):
-    logging.debug(f'In add_stocks')
+    # print(f'In add_stocks')
 
     df['id'] = df['symbol'].apply(lambda x: comp_dict.get(x))
 
@@ -81,7 +83,7 @@ def add_stocks(df, comp_dict):
 
 # Add the data to the daystocks table
 def add_daystocks(df, comp_dict):
-    logging.debug(f'In add_daystocks')
+    # print(f'In add_daystocks')
 
     daily_stats = df.resample('D', on='date').agg({
             'last': ['first', 'last', 'max', 'min'],
@@ -114,7 +116,7 @@ def add_daystocks(df, comp_dict):
     del daily_stats
 
 def add_tags(df):
-    logging.debug(f'In add_tags')
+    # print(f'In add_tags')
 
     tags_df = pd.DataFrame({
         "name": df["name"].copy(),
@@ -127,7 +129,7 @@ def add_tags(df):
 
 # Add the data to the file_done table
 def add_file_done(df):
-    logging.debug(f'In add_file_done')
+    # print(f'In add_file_done')
 
     filedone_df = pd.DataFrame({
         "name": df["filename"].unique()
@@ -140,16 +142,15 @@ def add_file_done(df):
 comp_dict = {}
 
 def make_companies_dict(df):
-    logging.debug(f'In make_companies_dict')
+    # print(f'In make_companies_dict')
     comp_dict.update(df.set_index('symbol')['mid'].to_dict())
     
 def add_to_database(df):
-    logging.debug(f'In add_to_database')
+    print(f'In add_to_database')
 
     for _, group in df.groupby('filename'):
         comp_df = add_companies(group)
         make_companies_dict(comp_df)
-        logging.debug(f"here is the dict: {comp_dict}")
 
         stocks_df = add_stocks(group, comp_dict)
         del stocks_df
@@ -158,6 +159,7 @@ def add_to_database(df):
         add_file_done(group)
         del group
     
+    print(f"In add_daystocks")
     for _, group in df.groupby('symbol'):
         add_daystocks(group, comp_dict)
 
@@ -184,14 +186,14 @@ def process_file(path):
         del df
 
 def load_all_files():
-    logging.debug(f'In load_all_files')
+    print(f'In load_all_files')
 
     folder_path = "/home/bourse/data/boursorama/"
     file_paths_by_year_month = {}
 
-    year_folder = "2020"
-    if True:
-    # year_folder in os.listdir(folder_path):
+    #year_folder = "2020"
+    #if True:
+    for year_folder in os.listdir(folder_path):
         year_path = os.path.join(folder_path, year_folder)
         for i in ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"]:
             key = year_folder + "-" + i
@@ -203,26 +205,25 @@ def load_all_files():
                     year_month = "-".join(file_name.split()[1].split("-")[:2])  # Extract year-month from file name
                     file_paths_by_year_month[year_month].append(os.path.join(year_path, file_name))
 
-    logging.debug(f"Total number of files to process: {sum(len(files) for files in file_paths_by_year_month.values())}")
+    print(f"Total number of files to process: {sum(len(files) for files in file_paths_by_year_month.values())}")
 
     return file_paths_by_year_month
 
 def init_comp_dict():
     df = list(db.df_query("SELECT * FROM companies"))
     df = pd.concat(df, ignore_index=True)
-    print(df)
     comp_dict.update(df.set_index('symbol')['mid'].to_dict())
 
 
 def fill_database():
     file_paths = load_all_files()
 
-    logging.debug("Starting to process files")
+    print("Starting to process files")
 
     init_comp_dict()
 
     for key in tqdm(file_paths, total=len(file_paths), desc="Processing Months"):
-        logging.debug(f"Month to process: {key}")
+        print(f"Month to process: {key}")
         process_file(file_paths[key])
 
     del file_paths
@@ -237,7 +238,7 @@ def fill_database():
     #             pbar.update(1)
 
 if __name__ == '__main__':
-    logging.debug(f'In MAIN')
+    print(f'In MAIN')
 
     fill_database()
 
