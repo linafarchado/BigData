@@ -30,9 +30,10 @@ frequency_options = {
 }
 
 app.layout = html.Div([
-
+                html.Label('Select Market'),
+                dcc.Dropdown(id='market-dropdown'),
                 html.Label('Multi-Select Company Dropdown'),
-                dcc.Dropdown(id='company-dropdown', multi=True),  # Update dropdown ID
+                dcc.Dropdown(id='company-dropdown', multi=True),
                 html.Button('Update Companies', id='update-companies', n_clicks=0),
 
                 html.Label('Time Period:'),
@@ -100,13 +101,25 @@ app.layout = html.Div([
                 html.Div(id='query-result')
              ])
 
-def get_stocks(symbol):
-    query = f"SELECT date, value FROM stocks WHERE cid = (SELECT mid FROM companies WHERE symbol = '{symbol}')"
+def get_stocks(id):
+    query = f"SELECT date, value FROM stocks WHERE cid = '{id}'"
     return pd.read_sql_query(query, engine)
 
-def get_daystocks(symbol):
-    query = f"SELECT date, open, high, low, close FROM daystocks WHERE cid = (SELECT mid FROM companies WHERE symbol = '{symbol}')"
+def get_daystocks(id):
+    query = f"SELECT date, open, high, low, close FROM daystocks WHERE cid = '{id}'"
     return pd.read_sql_query(query, engine)
+
+def get_company(selected_companies):
+    # Assuming selected_companies is a list of IDs
+    if len(selected_companies) == 1:
+        # If there's only one element, use it directly without converting to a tuple
+        selected_companies_str = f'({selected_companies[0]})'
+    else:
+        # If there are multiple elements, convert the list to a tuple
+        selected_companies_tuple = tuple(selected_companies)
+        selected_companies_str = str(selected_companies_tuple)
+
+    return pd.read_sql_query(f'SELECT name, symbol, id FROM companies WHERE id IN {selected_companies_str}', engine)
 
 def update_shown_dates(stocks_df, start_date, end_date):
     if start_date and end_date:
@@ -122,14 +135,14 @@ def update_frequence_data(stocks_df, frequency):
 
     return daily_stats.dropna()
 
-def display_raw_data(symbol, company_to_display, stocks_df, table_data):
+def display_raw_data(symbol, company_to_display, stocks_df, table_data, name):
     if company_to_display == symbol:
         daily_stats = stocks_df.resample('D', on='date').agg({
             'value': ['min', 'max', 'mean', 'std'],
             'date': ['first', 'last']
         }).reset_index()
 
-        daily_stats.columns = [symbol, 'Min', 'Max', 'Mean', 'Std', 'First', 'Last']
+        daily_stats.columns = [name, 'Min', 'Max', 'Mean', 'Std', 'First', 'Last']
 
         daily_stats['Mean'] = daily_stats['Mean'].apply(lambda x: round(x, 5))
         daily_stats['Std'] = daily_stats['Std'].apply(lambda x: round(x, 5))
@@ -180,7 +193,7 @@ def calculate_bollinger_bands(stocks_df, window=20):
     
     return upper_band_trace, lower_band_trace, average_trace
 
-def create_line_data(frequency_df, graph_type, frequency, symbol):
+def create_line_data(frequency_df, graph_type, frequency, name):
     daily_stats = frequency_df.resample(frequency, on='date').agg({
             'value': ['first', 'max', 'min', 'last']
         }).reset_index()
@@ -195,26 +208,42 @@ def create_line_data(frequency_df, graph_type, frequency, symbol):
             'low': daily_stats['low'],
             'close': daily_stats['close'],
             'type': 'candlestick',
-            'name': symbol
+            'name': name
         }
     else:
         line_data = {
             'x': daily_stats['date'],
             'y': daily_stats['close'],
-            'name': symbol
+            'name': name
         }
 
     return line_data, daily_stats
 
 @app.callback(
-    ddep.Output('company-dropdown', 'options'),
+    ddep.Output('market-dropdown', 'options'),
     ddep.Input('update-companies', 'n_clicks')
 )
-def update_dropdown_options(n_clicks):
+def update_market_dropdown(n_clicks):
     if n_clicks > 0:
         try:
-            company_df = pd.read_sql_query('SELECT name, symbol FROM companies', engine)
-            return [{'label': row['name'] + " - " + row['symbol'], 'value': row['symbol']} for _, row in company_df.iterrows()]
+            market_df = pd.read_sql_query('SELECT name, id FROM markets', engine)
+            market_options = [{'label': row['name'], 'value': row['id']} for _, row in market_df.iterrows()]
+            return market_options
+        
+        except Exception as e:
+            return []
+    return []
+
+@app.callback(
+    ddep.Output('company-dropdown', 'options'),
+    ddep.Input('market-dropdown', 'value')
+)
+def update_company_dropdown(selected_market):
+    if selected_market:
+        try:
+            company_df = pd.read_sql_query(f"SELECT name, symbol, id FROM companies WHERE mid = {selected_market}", engine)
+            company_options = [{'label': row['name'] + " - " + row['symbol'], 'value': row['id']} for _, row in company_df.iterrows()]
+            return company_options
         
         except Exception as e:
             return []
@@ -242,11 +271,16 @@ def update_stock_prices_graph(selected_companies, yaxis_type, start_date, end_da
     if selected_companies:
         # try:
             stock_data, table_data = [], []
-            dropdown_options = [{'label': company, 'value': company} for company in selected_companies]
 
-            for symbol in selected_companies:
-                stocks_df = get_stocks(symbol)
-                daystocks_df = get_daystocks(symbol)
+            company_df = get_company(selected_companies)
+
+            dropdown_options = [{'label': row['name'] + " - " + row['symbol'], 'value': row['id']} for _, row in company_df.iterrows()]
+
+            for id in selected_companies:
+                company_name = company_df.loc[company_df['id'] == id, 'name'].iloc[0]
+
+                stocks_df = get_stocks(id)
+                daystocks_df = get_daystocks(id)
 
                 if not stocks_df.empty:
                     stocks_df = stocks_df.sort_values(by='date')
@@ -254,9 +288,9 @@ def update_stock_prices_graph(selected_companies, yaxis_type, start_date, end_da
 
                     stocks_df = update_shown_dates(stocks_df, start_date, end_date)
 
-                    table_data = display_raw_data(symbol, company_to_display, stocks_df, table_data)
+                    table_data = display_raw_data(id, company_to_display, stocks_df, table_data, company_name)
 
-                    line_data, frequency_df = create_line_data(stocks_df.copy(), graph_type, frequency, symbol)
+                    line_data, frequency_df = create_line_data(stocks_df.copy(), graph_type, frequency, company_name)
 
                     if 'Bollinger Bands' in show_bollinger_bands:
                         upper_band, lower_band, sma_line = calculate_bollinger_bands(frequency_df.copy(), bollinger_window)
