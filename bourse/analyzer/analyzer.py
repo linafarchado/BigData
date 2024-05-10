@@ -46,7 +46,7 @@ def add_companies(df):
 
     if len(unique_symbols) == 1:
         # If there's only one element, use it directly without converting to a tuple
-        unique_symbols_str = f'({unique_symbols[0]})'
+        unique_symbols_str = str(unique_symbols).replace('{', '(').replace('}', ')')
     else:
         # If there are multiple elements, convert the list to a tuple
         unique_symbols_tuple = tuple(unique_symbols)
