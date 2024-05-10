@@ -19,6 +19,7 @@ MAX_INT_VALUE = 2147483647
 
 comp_dict = {}
 market_dict = {}
+tags_dict = {}
 
 def clean_c_s(df):
     df['last'] = df['last'].str.replace(r'\((c|s)\)$', '', regex=True)
@@ -43,9 +44,18 @@ def add_companies(df):
     unique_symbols_df = df.drop_duplicates(subset=['key']).reset_index()
     unique_symbols = set(unique_symbols_df['symbol'])
 
+    if len(unique_symbols) == 1:
+        # If there's only one element, use it directly without converting to a tuple
+        unique_symbols_str = f'({unique_symbols[0]})'
+    else:
+        # If there are multiple elements, convert the list to a tuple
+        unique_symbols_tuple = tuple(unique_symbols)
+        unique_symbols_str = str(unique_symbols_tuple)
+
+
     existing_symbols = set()
     # Fetch existing symbols from the database in chunks
-    for chunk in db.df_query("SELECT DISTINCT symbol, mid FROM companies WHERE symbol IN %s", args=(tuple(unique_symbols),), chunksize=10000):
+    for chunk in db.df_query("SELECT DISTINCT symbol, mid FROM companies WHERE symbol IN %s", args=unique_symbols_str, chunksize=10000):
         chunk['key'] = chunk['symbol'] + " " + chunk['mid'].astype(str)
         existing_symbols.update(chunk['key'])
     
@@ -88,9 +98,12 @@ def add_stocks(df):
         "volume": df["volume"].copy(),
     })
 
+    # stocks_df.loc[stocks_df['volume'] > MAX_INT_VALUE, 'volume'] = MAX_INT_VALUE
+    stocks_df = stocks_df[stocks_df['volume'] <= MAX_INT_VALUE]
+
     db.df_write(stocks_df, "stocks", index=False, if_exists="append", commit=True)
 
-    return stocks_df
+    del stocks_df
 
 # Add the data to the daystocks table
 def add_daystocks(df, key):
@@ -129,15 +142,19 @@ def add_daystocks(df, key):
 
 def add_tags(df):
     # print(f'In add_tags')
+    counts = []
+    for key in market_dict.keys():
+        count = next(db.df_query(f"SELECT count(*) FROM companies WHERE mid = (SELECT id FROM markets where alias = '{key}')"))['count'][0]
+        counts.append(count)
 
     tags_df = pd.DataFrame({
-        "name": df["name"].copy(),
-        "value": df["last"].copy()
+        "name": market_dict.keys(),
+        "value": counts
     })
 
-    db.df_write(tags_df, "tags", index=False, if_exists="append", commit=True)
+    db.df_write(tags_df, "tags", index=False, if_exists="replace", commit=True)
 
-    return tags_df
+    del tags_df
 
 def add_market(name):
     if not name in market_dict:
@@ -168,7 +185,7 @@ def add_file_done(df):
 
     db.df_write(filedone_df, "file_done", index=False, if_exists="append", commit=True)
 
-    return filedone_df
+    del filedone_df
 
 def make_companies_dict(df):
     # print(f'In make_companies_dict')
@@ -180,21 +197,23 @@ def add_to_database(df):
     print(f'In add_to_database')
 
     total_groups_filename = len(df.groupby('filename'))
-    for _, group in tqdm(df.groupby('filename'), total=total_groups_filename, desc="Add to DataBase"):
-
+    for _, group in tqdm(df.groupby('filename'), total=total_groups_filename, desc="Add Companies to DataBase"):
+        add_tags(group)
         comp_df = add_companies(group)
         make_companies_dict(comp_df)
-
-        stocks_df = add_stocks(group)
-        del stocks_df
         del comp_df
-
-        add_file_done(group)
         del group
 
     total_groups_symbol = len(df.groupby('symbol'))
-    for _, group in tqdm(df.groupby('key'), total=total_groups_symbol, desc="Add Daystocks to DataBase"):
+    for _, group in tqdm(df.groupby('key'), total=total_groups_symbol, desc="Add Stocks to DataBase"):
         add_daystocks(group, group['key'].iloc[0])
+        add_stocks(group)
+        del group
+
+    total_groups_filename = len(df.groupby('filename'))
+    for _, group in tqdm(df.groupby('filename'), total=total_groups_filename, desc="Add Files to DataBase"):
+        add_file_done(group)
+        del group
 
 def extract_date_filename_market(filepath):
     filename = os.path.basename(filepath)
@@ -260,10 +279,16 @@ def init_market_dict():
     df = pd.concat(df, ignore_index=True)
     market_dict.update(df.set_index('alias')['id'].to_dict())
 
+def init_tags_dict():
+    df = list(db.df_query("SELECT * FROM tags"))
+    df = pd.concat(df, ignore_index=True)
+    tags_dict.update(df.set_index('name')['value'].to_dict())
+
 def fill_database():
 
     init_comp_dict()
     init_market_dict()
+    init_tags_dict()
 
     file_paths = load_all_files()
 
