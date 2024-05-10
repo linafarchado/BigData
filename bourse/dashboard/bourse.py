@@ -1,22 +1,19 @@
 import dash
-from dash import dcc
-from dash import html
+from dash import dcc, html
 import dash.dependencies as ddep
 import pandas as pd
 import sqlalchemy
 import logging
 
-from datetime import date, timedelta
-import plotly.graph_objects as go
-import plotly.express as px
+from datetime import date
 
-# external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
+external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
 
 DATABASE_URI = 'timescaledb://ricou:monmdp@db:5432/bourse'    # inside docker
 # DATABASE_URI = 'timescaledb://ricou:monmdp@localhost:5432/bourse'  # outisde docker
 engine = sqlalchemy.create_engine(DATABASE_URI)
 
-app = dash.Dash(__name__,  title="Bourse", suppress_callback_exceptions=True) # , external_stylesheets=external_stylesheets)
+app = dash.Dash(__name__,  title="Bourse", suppress_callback_exceptions=True, external_stylesheets=external_stylesheets)
 server = app.server
 logging.basicConfig(level=logging.DEBUG)
 
@@ -30,64 +27,92 @@ frequency_options = {
 }
 
 app.layout = html.Div([
+    html.Header(html.H1('Bourse'), className='header'),
+    html.Div([
+        html.Div([
+            html.Label('Multi-Select Company Dropdown', className='label'),
+            dcc.Dropdown(id='company-dropdown', multi=True, className='dropdown'),
+            html.Button('Update Companies', id='update-companies', n_clicks=0, className='button', style={'marginBottom': '10px'})
+        ], className='form-group'),
 
-                html.Label('Multi-Select Company Dropdown'),
-                dcc.Dropdown(id='company-dropdown', multi=True),  # Update dropdown ID
-                html.Button('Update Companies', id='update-companies', n_clicks=0),
+        html.Div([
+            html.Label('Time Period:', className='date-label'),
+            dcc.DatePickerRange(
+                id='date-picker-range',
+                min_date_allowed=date(2020, 1, 1),
+                max_date_allowed=date.today(),
+                initial_visible_month=date.today(),
+                start_date=date(2019, 1, 1),
+                end_date=date.today(),
+                className='date-picker'
+            )
+        ], className='form-group'),
 
-                html.Label('Time Period:'),
-                dcc.DatePickerRange(
-                    id='date-picker-range',
-                    min_date_allowed=date(2020, 1, 1),
-                    max_date_allowed=date.today(),
-                    initial_visible_month=date.today(),
-                    start_date=date(2019, 1, 1),
-                    end_date=date.today(),
-                ),
+        html.Div([
+            html.Label('Scale Type:', className='label'),
+            dcc.RadioItems(
+                ['Linear', 'Log'],
+                'Linear',
+                id='crossfilter-xaxis-type',
+                labelStyle={'display': 'inline-block', 'marginTop': '5px'},
+                className='radio-group'
+            )
+        ], className='form-group'),
 
-                html.Label('Scale Type:'),
-                dcc.RadioItems(
-                    ['Linear', 'Log'],
-                    'Linear',
-                    id='crossfilter-xaxis-type',
-                    labelStyle={'display': 'inline-block', 'marginTop': '5px'}
-                ),
+        html.Div([
+            html.Label('Graph Type:', className='label'),
+            dcc.RadioItems(
+                ['Line', 'Candlestick'],
+                'Line',
+                id='graph-type',
+                labelStyle={'display': 'inline-block', 'marginTop': '5px'},
+                className='radio-group'
+            )
+        ], className='form-group'),
 
-                html.Label('Graph Type:'),
-                dcc.RadioItems(
-                    ['Line', 'Candlestick'],
-                    'Line',
-                    id='graph-type',
-                    labelStyle={'display': 'inline-block', 'marginTop': '5px'}
-                ),
+        html.Div([
+            html.Label('Show Bollinger Bands:', className='label'),
+            dcc.Checklist(['Bollinger Bands'], [],
+                id='show-bollinger-bands',
+                className='checklist'
+            )
+        ], className='form-group'),
 
-                html.Label('Show Bollinger Bands:'),
-                dcc.Checklist(['Bollinger Bands'], [],
-                    id='show-bollinger-bands'
-                ),
-                html.Label('Bollinger Bands Window:'),
-                dcc.Input(
-                    id='bollinger-window',
-                    type='number',
-                    value=20
-                ),
-                html.Label('Data Frenquency:'),
-                dcc.Dropdown(
+        html.Div([
+            html.Label('Bollinger Bands Window:', className='label'),
+            dcc.Input(
+                id='bollinger-window',
+                type='number',
+                value=20,
+                className='input'
+            )
+        ], className='form-group'),
+
+        html.Div([
+            html.Label('Data Frenquency:', className='label'),
+            dcc.Dropdown(
                 id='resample-frequency',
                 options=[{'label': k, 'value': v} for k, v in frequency_options.items()],
-                value='10min'
-            ),
-            html.Div(id='output-container', children=[]),
+                value='10min',
+                className='dropdown'
+            )
+        ], className='data-frequency-container'),
 
-                dcc.Graph(id='stock-prices-graph'),
+        html.Div(id='output-container', className='graph-container', children=[]),
 
-                dcc.Dropdown(
-                    id='company-to-display',
-                    value=None
-                ), 
-                html.Div(id='raw-data-table', style={'width': '100%', 'overflow-x': 'scroll'}),
+        html.Div([dcc.Graph(id='stock-prices-graph', className='graph-container')], className='graph-container'),
 
-                dcc.Textarea(
+        html.Div([
+            dcc.Dropdown(
+                id='company-to-display',
+                value=None,
+                className='dropdown'
+            )
+        ], className='dropdown-bar'),
+
+        html.Div(id='raw-data-table', className='raw-data-table', style={'overflowX': 'auto'}),
+
+        dcc.Textarea(
                     id='sql-query',
                     value='''
                         SELECT * FROM pg_catalog.pg_tables
@@ -96,9 +121,11 @@ app.layout = html.Div([
                     ''',
                     style={'width': '100%', 'height': 100},
                     ),
-                html.Button('Execute', id='execute-query', n_clicks=0),
+                html.Button('Execute', id='execute-query', n_clicks=0, className='button'),
                 html.Div(id='query-result')
-             ])
+    ], className='main-container')
+])
+
 
 def get_stocks(symbol):
     query = f"SELECT date, value FROM stocks WHERE cid = (SELECT mid FROM companies WHERE symbol = '{symbol}')"

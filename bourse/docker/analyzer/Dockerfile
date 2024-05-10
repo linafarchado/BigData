@@ -1,4 +1,4 @@
-FROM ubuntu:latest
+FROM ubuntu:22.04
 MAINTAINER Olivier Ricou <olivier@ricou.eu.org>
 
 # If you have a web spider getting data, then you can run 
@@ -25,7 +25,7 @@ RUN cp /usr/share/zoneinfo/Europe/Paris /etc/localtime && \
 
 RUN adduser --disabled-password --gecos "" bourse
 RUN chmod 755 /home/bourse
-RUN pip install yfinance
+RUN pip install tqdm
 
 USER bourse
 WORKDIR /home/bourse
