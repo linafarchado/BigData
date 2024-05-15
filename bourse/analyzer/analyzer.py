@@ -22,6 +22,7 @@ market_dict = {}
 tags_dict = {}
 
 def clean_c_s(df):
+    df['last'] = df['last'].astype(str)
     df['last'] = df['last'].str.replace(r'\((c|s)\)$', '', regex=True)
     df['last'] = df['last'].str.replace(' ', '')
     df['last'] = df['last'].astype(float)
@@ -201,18 +202,14 @@ def add_to_database(df):
         add_tags(group)
         comp_df = add_companies(group)
         make_companies_dict(comp_df)
+        add_stocks(group)
+        add_file_done(group)
         del comp_df
         del group
 
     total_groups_symbol = len(df.groupby('symbol'))
     for _, group in tqdm(df.groupby('key'), total=total_groups_symbol, desc="Add Stocks to DataBase"):
         add_daystocks(group, group['key'].iloc[0])
-        add_stocks(group)
-        del group
-
-    total_groups_filename = len(df.groupby('filename'))
-    for _, group in tqdm(df.groupby('filename'), total=total_groups_filename, desc="Add Files to DataBase"):
-        add_file_done(group)
         del group
 
 def extract_date_filename_market(filepath):
@@ -291,15 +288,17 @@ def fill_database():
     init_tags_dict()
 
     file_paths = load_all_files()
+    while len(file_paths) != 0:
 
-    logging.info("Starting to process files")
+        logging.info("Starting to process files")
 
-    
+        try:
+            for key in tqdm(file_paths, total=len(file_paths), desc="Processing Months"):
+                process_file(file_paths[key], key)
+        except Exception as e:
+            print(f"There has been an error: {e}")
 
-    for key in tqdm(file_paths, total=len(file_paths), desc="Processing Months"):
-        process_file(file_paths[key], key)
-
-    del file_paths
+        file_paths = load_all_files()
 
     # max_workers = os.cpu_count() * 3
     # with ProcessPoolExecutor(max_workers=max_workers) as executor:
