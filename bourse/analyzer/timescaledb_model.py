@@ -256,6 +256,11 @@ class TimescaleStockMarketModel:
         cursor = self.__connection.cursor()
         
         try:
+            if table_name == 'tags':
+                # Truncate the table if the table name is 'tags'
+                cursor.execute(f'TRUNCATE TABLE {table_name};')
+                self.__connection.commit()  # Commit the transaction to truncate the table
+                
             # Use the copy_from method to load the data into the table
             cursor.copy_from(buffer, table_name, sep='\t', null='\\N', columns=columns)
             # Commit the transaction
