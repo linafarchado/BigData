@@ -4,6 +4,7 @@
 # pipenv install sqlalchemy-timescaledb
 
 import datetime
+from io import StringIO
 import psycopg2
 import pandas as pd
 import sqlalchemy
@@ -239,6 +240,34 @@ class TimescaleStockMarketModel:
         Check if a file has already been included in the DB
         '''
         return self.raw_query("SELECT EXISTS ( SELECT 1 FROM file_done WHERE name = '%s' );" % name)[0][0]
+    
+    def dataframe_to_sql(self, df, table_name, columns=None):
+
+        # Create a StringIO object to use as a file-like object for the COPY FROM command
+        buffer = StringIO()
+        # Convert DataFrame to CSV format without the header and index
+        df.to_csv(buffer, sep='\t', index=False, header=False, na_rep='\\N')
+        # Move to the beginning of the StringIO object
+        buffer.seek(0)
+        # print(buffer.getvalue())
+
+        
+        
+        cursor = self.__connection.cursor()
+        
+        try:
+            # Use the copy_from method to load the data into the table
+            cursor.copy_from(buffer, table_name, sep='\t', null='\\N', columns=columns)
+            # Commit the transaction
+            self.__connection.commit()
+        except Exception as e:
+            # Rollback the transaction in case of error
+            self.__connection.rollback()
+            print(f"Error: {e}")
+        finally:
+            # Close the cursor
+            cursor.close()
+
 
 
 #

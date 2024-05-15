@@ -78,7 +78,7 @@ def add_companies(df):
         "sector": None
     })
 
-    db.df_write(comp_df, "companies", index=False, if_exists="append", commit=True)
+    db.dataframe_to_sql(comp_df, 'companies', columns=list(comp_df.columns.values))
 
     comp_df['id'] = comp_df.index + index_total + 1
 
@@ -102,7 +102,7 @@ def add_stocks(df):
     # stocks_df.loc[stocks_df['volume'] > MAX_INT_VALUE, 'volume'] = MAX_INT_VALUE
     stocks_df = stocks_df[stocks_df['volume'] <= MAX_INT_VALUE]
 
-    db.df_write(stocks_df, "stocks", index=False, if_exists="append", commit=True)
+    db.dataframe_to_sql(stocks_df, 'stocks', columns=list(stocks_df.columns.values))
 
     del stocks_df
 
@@ -136,7 +136,7 @@ def add_daystocks(df, key):
     # daystocks_df.loc[daystocks_df['volume'] > MAX_INT_VALUE, 'volume'] = MAX_INT_VALUE
     daystocks_df = daystocks_df[daystocks_df['volume'] <= MAX_INT_VALUE]
 
-    db.df_write(daystocks_df, "daystocks", index=False, if_exists="append", commit=True)
+    db.dataframe_to_sql(daystocks_df, 'daystocks', columns=list(daystocks_df.columns.values))
 
     del daystocks_df
     del daily_stats
@@ -153,7 +153,7 @@ def add_tags(df):
         "value": counts
     })
 
-    db.df_write(tags_df, "tags", index=False, if_exists="replace", commit=True)
+    db.dataframe_to_sql(tags_df, 'tags', columns=list(tags_df.columns.values))
 
     del tags_df
 
@@ -171,7 +171,7 @@ def add_market(name):
         })
 
         # Write the new market record to the 'markets' table
-        db.df_write(market_df, "markets", index=False, if_exists="append", commit=True)
+        db.dataframe_to_sql(market_df, 'markets', columns=list(market_df.columns.values))
         
     return name
 
@@ -184,7 +184,7 @@ def add_file_done(df):
         "name": df["filename"].unique()
     })
 
-    db.df_write(filedone_df, "file_done", index=False, if_exists="append", commit=True)
+    db.dataframe_to_sql(filedone_df, 'file_done', columns=list(filedone_df.columns.values))
 
     del filedone_df
 
@@ -199,7 +199,6 @@ def add_to_database(df):
 
     total_groups_filename = len(df.groupby('filename'))
     for _, group in tqdm(df.groupby('filename'), total=total_groups_filename, desc="Add Companies to DataBase"):
-        add_tags(group)
         comp_df = add_companies(group)
         make_companies_dict(comp_df)
         add_stocks(group)
@@ -211,6 +210,7 @@ def add_to_database(df):
     for _, group in tqdm(df.groupby('key'), total=total_groups_symbol, desc="Add Stocks to DataBase"):
         add_daystocks(group, group['key'].iloc[0])
         del group
+    add_tags(df)
 
 def extract_date_filename_market(filepath):
     filename = os.path.basename(filepath)
@@ -313,5 +313,15 @@ if __name__ == '__main__':
     logging.debug(f'In MAIN')
 
     fill_database()
+
+    # data = {
+    #     'name': ['wdwewe', 'wewwewedssd'],
+    #     'value': [75, None]
+    # }
+    # df = pd.DataFrame(data)
+
+    # # Load the DataFrame into the SQL table
+    # db.dataframe_to_sql(df, 'tags', columns=list(df.columns.values))
+
 
     print("Done")

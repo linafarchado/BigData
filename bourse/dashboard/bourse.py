@@ -257,7 +257,7 @@ def create_line_data(frequency_df, graph_type, frequency, name):
 def update_market_dropdown(n_clicks):
     if n_clicks > 0:
         try:
-            market_df = pd.read_sql_query('SELECT name, id FROM markets WHERE alias IN (SELECT name FROM tags WHERE value > 0)', engine)
+            market_df = pd.read_sql_query('SELECT name, id FROM markets WHERE alias IN (SELECT name FROM tags WHERE value::integer > 0)', engine)
             market_options = [{'label': row['name'], 'value': row['id']} for _, row in market_df.iterrows()]
             return market_options
         
