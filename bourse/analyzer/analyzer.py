@@ -33,8 +33,6 @@ def clean_data(df):
     df2 = df1.dropna(subset=['last', 'volume'])
     del df1
 
-    df2 = df2[df2['volume'] > 0]
-
     return clean_c_s(df2)
 
 
@@ -247,7 +245,7 @@ def load_all_files():
     folder_path = "/home/bourse/data/boursorama/"
     file_paths_by_year_month = {}
 
-    # year_folder = "2023"
+    # year_folder = "2020"
     # if True:
     for year_folder in os.listdir(folder_path):
         year_path = os.path.join(folder_path, year_folder)
@@ -288,40 +286,21 @@ def fill_database():
     init_tags_dict()
 
     file_paths = load_all_files()
-    while len(file_paths) != 0:
-
+    while sum(len(files) for files in file_paths.values()) != 0:
         logging.info("Starting to process files")
 
         try:
             for key in tqdm(file_paths, total=len(file_paths), desc="Processing Months"):
                 process_file(file_paths[key], key)
         except Exception as e:
-            print(f"There has been an error: {e}")
+           print(f"There has been an error: {e}")
 
         file_paths = load_all_files()
-
-    # max_workers = os.cpu_count() * 3
-    # with ProcessPoolExecutor(max_workers=max_workers) as executor:
-    #     futures = [executor.submit(process_file, path) for path in file_paths]
-
-    #     with tqdm(total=len(futures), desc="Processing files") as pbar:
-    #         for future in as_completed(futures):
-    #             future.result()
-    #             pbar.update(1)
 
 if __name__ == '__main__':
     logging.debug(f'In MAIN')
 
     fill_database()
-
-    # data = {
-    #     'name': ['wdwewe', 'wewwewedssd'],
-    #     'value': [75, None]
-    # }
-    # df = pd.DataFrame(data)
-
-    # # Load the DataFrame into the SQL table
-    # db.dataframe_to_sql(df, 'tags', columns=list(df.columns.values))
 
 
     print("Done")
