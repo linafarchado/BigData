@@ -186,6 +186,9 @@ def display_raw_data(symbol, company_to_display, stocks_df, table_data, name, pa
         daily_stats['Mean'] = daily_stats['Mean'].apply(lambda x: round(x, 5))
         daily_stats['Std'] = daily_stats['Std'].apply(lambda x: round(x, 5))
 
+        to_fill = ['Min', 'Max', 'Mean', 'Std']
+        daily_stats.loc[:,to_fill] = daily_stats.loc[:,to_fill].ffill()
+
         total_pages = (len(daily_stats) + page_size - 1) // page_size
         start_row = (page - 1) * page_size
         end_row = start_row + page_size
