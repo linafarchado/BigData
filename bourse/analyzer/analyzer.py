@@ -33,8 +33,9 @@ def clean_data(df):
     df2 = df1.dropna(subset=['last', 'volume'])
     del df1
 
-    return clean_c_s(df2)
+    df2 = df2[df2['volume'] > 0]
 
+    return clean_c_s(df2)
 
 # Add the data to the companies table
 def add_companies(df):
@@ -200,7 +201,6 @@ def add_to_database(df):
         comp_df = add_companies(group)
         make_companies_dict(comp_df)
         add_stocks(group)
-        add_file_done(group)
         del comp_df
         del group
 
@@ -231,12 +231,15 @@ def load_and_clean_file(path):
 
         df['key'] = df['symbol'] + " " + df['market'].apply(lambda x: str(market_dict.get(x)))
 
+        add_file_done(df)
+
         return clean_data(df)
 
 def process_file(path, key):
     if (len(path) > 0):
         df = pd.concat([load_and_clean_file(p) for p in tqdm(path, total=len(path), desc=f"Load and clean {key}")])
-        add_to_database(df)
+        if not df.empty:
+            add_to_database(df)
         del df
 
 def load_all_files():
@@ -301,6 +304,5 @@ if __name__ == '__main__':
     logging.debug(f'In MAIN')
 
     fill_database()
-
 
     print("Done")
