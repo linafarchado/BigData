@@ -175,7 +175,7 @@ def update_frequence_data(stocks_df, frequency):
 
 def display_raw_data(symbol, company_to_display, stocks_df, table_data, name, page, page_size):
     total_pages = 0
-    if company_to_display == symbol:
+    if company_to_display == symbol and len(stocks_df) > 0:
         daily_stats = stocks_df.resample('D', on='date').agg({
             'value': ['min', 'max', 'mean', 'std'],
             'date': ['first', 'last']
@@ -210,6 +210,10 @@ def display_raw_data(symbol, company_to_display, stocks_df, table_data, name, pa
         ])
 
         table_data.append(pagination_controls)
+        
+    if company_to_display == symbol and len(stocks_df) == 0:
+        table_data.append(html.Div("No data to display", className='no-data-message'))
+        total_pages = 0
 
     return table_data, total_pages
 

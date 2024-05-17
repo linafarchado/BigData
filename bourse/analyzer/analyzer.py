@@ -29,13 +29,9 @@ def clean_c_s(df):
     return df
 
 def clean_data(df):
-    df1 = df.drop_duplicates()
-    df2 = df1.dropna(subset=['last', 'volume'])
-    del df1
-
-    df2 = df2[df2['volume'] > 0]
-
-    return clean_c_s(df2)
+    df = df.drop_duplicates().dropna(subset=['last', 'volume'])
+    df = df[df['volume'] > 0]
+    return clean_c_s(df)
 
 # Add the data to the companies table
 def add_companies(df):
@@ -51,7 +47,7 @@ def add_companies(df):
         # If there are multiple elements, convert the list to a tuple
         unique_symbols_tuple = tuple(unique_symbols)
         unique_symbols_str = str(unique_symbols_tuple)
-
+    del unique_symbols
 
     existing_symbols = set()
     # Fetch existing symbols from the database in chunks
@@ -62,6 +58,7 @@ def add_companies(df):
     index_total = next(db.df_query("SELECT count(*) FROM companies"))['count'][0]
 
     unique_symbols_df = unique_symbols_df[~unique_symbols_df['key'].isin(existing_symbols)].reset_index()
+    del existing_symbols
 
     unique_symbols_df['market_id'] = unique_symbols_df['market'].apply(lambda x: market_dict.get(x))
 
@@ -140,7 +137,7 @@ def add_daystocks(df, key):
     del daystocks_df
     del daily_stats
 
-def add_tags(df):
+def add_tags():
     # print(f'In add_tags')
     counts = []
     for key in market_dict.keys():
@@ -171,6 +168,7 @@ def add_market(name):
 
         # Write the new market record to the 'markets' table
         db.dataframe_to_sql(market_df, 'markets', columns=list(market_df.columns.values))
+        del market_df
         
     return name
 
@@ -208,7 +206,7 @@ def add_to_database(df):
     for _, group in tqdm(df.groupby('key'), total=total_groups_symbol, desc="Add Stocks to DataBase"):
         add_daystocks(group, group['key'].iloc[0])
         del group
-    add_tags(df)
+    add_tags()
 
 def extract_date_filename_market(filepath):
     filename = os.path.basename(filepath)
