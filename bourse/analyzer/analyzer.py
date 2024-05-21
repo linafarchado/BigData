@@ -6,7 +6,6 @@ import logging
 import bz2
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import os
-from tqdm import tqdm
 from datetime import datetime
 
 db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'db', 'monmdp')        # inside docker
@@ -194,16 +193,14 @@ def make_companies_dict(df):
 def add_to_database(df):
     print(f'In add_to_database')
 
-    total_groups_filename = len(df.groupby('filename'))
-    for _, group in tqdm(df.groupby('filename'), total=total_groups_filename, desc="Add Companies to DataBase"):
+    for _, group in df.groupby('filename'):
         comp_df = add_companies(group)
         make_companies_dict(comp_df)
         add_stocks(group)
         del comp_df
         del group
 
-    total_groups_symbol = len(df.groupby('symbol'))
-    for _, group in tqdm(df.groupby('key'), total=total_groups_symbol, desc="Add Stocks to DataBase"):
+    for _, group in df.groupby('key'):
         add_daystocks(group, group['key'].iloc[0])
         del group
     add_tags()
@@ -235,7 +232,7 @@ def load_and_clean_file(path):
 
 def process_file(path, key):
     if (len(path) > 0):
-        df = pd.concat([load_and_clean_file(p) for p in tqdm(path, total=len(path), desc=f"Load and clean {key}")])
+        df = pd.concat([load_and_clean_file(p) for p in path])
         if not df.empty:
             add_to_database(df)
         del df
@@ -291,7 +288,7 @@ def fill_database():
         logging.info("Starting to process files")
 
         try:
-            for key in tqdm(file_paths, total=len(file_paths), desc="Processing Months"):
+            for key in file_paths:
                 process_file(file_paths[key], key)
         except Exception as e:
            print(f"There has been an error: {e}")
