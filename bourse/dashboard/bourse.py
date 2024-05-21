@@ -29,8 +29,6 @@ frequency_options = {
 }
 
 app.layout = html.Div([
-    dcc.Store(id='current-page', data=1),  # Store to keep track of the current page
-    dcc.Store(id='total-pages', data=1),   # Store to keep track of the total pages
     html.Header(html.H1('Bourse'), className='header'),
     html.Div([
         html.Div([
@@ -116,12 +114,6 @@ app.layout = html.Div([
     
     html.Div(id='raw-data-table', className='data-table'),
 
-    html.Div([
-            html.Button("Previous", id="prev-page", n_clicks=0, disabled=True, className='button', style = dict(display='none')),
-            html.Span(id='page-display'),
-            html.Button("Next", id="next-page", n_clicks=0, disabled=True, className='button', style = dict(display='none')),
-        ]),
-
     html.Header(html.H3('Sql Query'), className='title'),
     dcc.Textarea(
         id='sql-query',
@@ -173,8 +165,7 @@ def update_frequence_data(stocks_df, frequency):
 
     return daily_stats.dropna()
 
-def display_raw_data(symbol, company_to_display, stocks_df, table_data, name, page, page_size):
-    total_pages = 0
+def display_raw_data(symbol, company_to_display, stocks_df, table_data, name):
     if company_to_display == symbol and len(stocks_df) > 0:
         daily_stats = stocks_df.resample('D', on='date').agg({
             'value': ['min', 'max', 'mean', 'std'],
@@ -189,33 +180,18 @@ def display_raw_data(symbol, company_to_display, stocks_df, table_data, name, pa
         to_fill = ['Min', 'Max', 'Mean', 'Std']
         daily_stats.loc[:,to_fill] = daily_stats.loc[:,to_fill].ffill()
 
-        total_pages = (len(daily_stats) + page_size - 1) // page_size
-        start_row = (page - 1) * page_size
-        end_row = start_row + page_size
-
-        paginated_stats = daily_stats.iloc[start_row:end_row]
-
         table_data.append(html.Table(
             children=[
-                html.Tr([html.Th(col) for col in paginated_stats.columns])
+                html.Tr([html.Th(col) for col in daily_stats.columns])
             ] + [
-                html.Tr([html.Td(val) for val in row]) for _, row in paginated_stats.iterrows()
+                html.Tr([html.Td(val) for val in row]) for _, row in daily_stats.iterrows()
             ]
         ))
-
-        pagination_controls = html.Div([
-            html.Button("Previous", id="prev-page", n_clicks=0, disabled=page <= 1, className='button'),
-            html.Span(f"Page {page} of {total_pages}", id='page-display'),
-            html.Button("Next", id="next-page", n_clicks=0, disabled=page >= total_pages, className='button'),
-        ])
-
-        table_data.append(pagination_controls)
         
     if company_to_display == symbol and len(stocks_df) == 0:
         table_data.append(html.Div("No data to display", className='no-data-message'))
-        total_pages = 0
 
-    return table_data, total_pages
+    return table_data
 
 def calculate_bollinger_bands(stocks_df, window=20):
     stocks_df['mean'] = stocks_df['close'].rolling(window).mean()
@@ -314,8 +290,6 @@ def update_company_dropdown(selected_market):
         ddep.Output('stock-prices-graph', 'figure'),
         ddep.Output('raw-data-table', 'children'),
         ddep.Output('company-to-display', 'options'),
-        ddep.Output('current-page', 'data'),
-        ddep.Output('total-pages', 'data')
     ],
     [
         ddep.Input('company-dropdown', 'value'),
@@ -327,31 +301,15 @@ def update_company_dropdown(selected_market):
         ddep.Input('show-bollinger-bands', 'value'),
         ddep.Input('bollinger-window', 'value'),
         ddep.Input('resample-frequency', 'value'),
-        ddep.Input('prev-page', 'n_clicks'),
-        ddep.Input('next-page', 'n_clicks')
-    ],
-    [
-        ddep.State('current-page', 'data'),
-        ddep.State('total-pages', 'data')
     ]
 )
-def update_stock_prices_graph(selected_companies, yaxis_type, start_date, end_date, graph_type, company_to_display, show_bollinger_bands, bollinger_window, frequency, prev_clicks, next_clicks, current_page, total_pages):
+def update_stock_prices_graph(selected_companies, yaxis_type, start_date, end_date, graph_type, company_to_display, show_bollinger_bands, bollinger_window, frequency):
     if selected_companies:
         stock_data, table_data = [], []
 
         company_df = get_company(selected_companies)
 
         dropdown_options = [{'label': row['name'] + " - " + row['symbol'], 'value': row['id']} for _, row in company_df.iterrows()]
-
-        page_size = 50
-        if current_page is None:
-            current_page = 1
-        
-        changed_id = [p['prop_id'] for p in dash.callback_context.triggered][0]
-        if 'prev-page' in changed_id and current_page > 1:
-            current_page -= 1
-        elif 'next-page' in changed_id and current_page < total_pages:
-            current_page += 1
 
         for id in selected_companies:
             company_name = company_df.loc[company_df['id'] == id, 'name'].iloc[0]
@@ -365,8 +323,7 @@ def update_stock_prices_graph(selected_companies, yaxis_type, start_date, end_da
 
                 stocks_df = update_shown_dates(stocks_df, start_date, end_date)
 
-                table_data, new_total_pages = display_raw_data(id, company_to_display, stocks_df, table_data, company_name, current_page, page_size)
-                total_pages = new_total_pages
+                table_data = display_raw_data(id, company_to_display, stocks_df, table_data, company_name)
 
                 line_data, frequency_df = create_line_data(stocks_df.copy(), graph_type, frequency, company_name)
 
@@ -385,8 +342,10 @@ def update_stock_prices_graph(selected_companies, yaxis_type, start_date, end_da
             }
         }
 
-        return figure, table_data, dropdown_options, current_page, total_pages
-    return {}, [], {}, 1, 1
+        return figure, table_data, dropdown_options
+        # except Exception as e:
+        #     return {}, [], {}
+    return {}, [], {}
 
 
 @app.callback( ddep.Output('query-result', 'children'),
