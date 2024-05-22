@@ -23,7 +23,8 @@ The Python packages should be installed by the docker-compose.yml once launched.
 ## How to Launch the Project
 
 ### Step 1: Download and Place Data
-1. Download the required data and place the `boursorama` folder inside the `bourse/data` directory.
+1. Create `bourse/data` directory.
+2. Download the required data and place the `boursorama` folder inside the `bourse/data` directory.
 
 ### Step 2: Configure Paths
 
@@ -46,7 +47,7 @@ docker-compose down; cd analyzer/; make; cd ../dashboard/; make; cd ..; docker-c
 ```
 
 ### Step 4: Wait for Processing
-1. The process takes approximately 4 hours to complete. You will see "Done" at the end of the process.
+1. The process takes approximately between 3hours 30 minutes and 4hours to complete. You will see "Done" at the end of the process.
 
 ### Step 5: Access the Dashboard
 1. Once the process is complete, go to `localhost:8050` in your web browser to see the dashboard.

@@ -1,12 +1,8 @@
 import pandas as pd
-import numpy as np
 import os
 import timescaledb_model as tsdb
 import logging
 import bz2
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import os
-from datetime import datetime
 
 db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'db', 'monmdp')        # inside docker
 #db = tsdb.TimescaleStockMarketModel('bourse', 'ricou', 'localhost', 'monmdp') # outside docker
@@ -128,7 +124,6 @@ def add_daystocks(df, key):
         "volume": daily_stats["volume"].copy()
     })
 
-    # daystocks_df.loc[daystocks_df['volume'] > MAX_INT_VALUE, 'volume'] = MAX_INT_VALUE
     daystocks_df = daystocks_df[daystocks_df['volume'] <= MAX_INT_VALUE]
 
     db.dataframe_to_sql(daystocks_df, 'daystocks', columns=list(daystocks_df.columns.values))
@@ -162,10 +157,9 @@ def add_market(name):
         market_df = pd.DataFrame({
             "id": [next_id],
             "name": [name],
-            "alias": [name]  # Assuming the alias is the same as the name for new markets
+            "alias": [name]
         })
 
-        # Write the new market record to the 'markets' table
         db.dataframe_to_sql(market_df, 'markets', columns=list(market_df.columns.values))
         del market_df
         
@@ -187,7 +181,6 @@ def add_file_done(df):
 def make_companies_dict(df):
     # print(f'In make_companies_dict')
     df['key'] = df['symbol'] + " " + df['mid'].astype(str)
-    # print(df['key'])
     comp_dict.update(df.set_index('key')['id'].to_dict())
     
 def add_to_database(df):
