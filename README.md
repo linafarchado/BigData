@@ -39,18 +39,25 @@ volumes:
 - Replace `/path/to/data` with the path to your raw data directory.
 - Replace `/path/to/timescaledb` with the path for your database storage.
 
-### Step 3: Launch the Docker Container
-1. Navigate to the `docker/` directory and use the following command to start the process:
+### Step 3 : Connect with docker login
+1. Create an account on https://hub.docker.com/  
+2. Launch the following command and log into your account
+```shell
+docker login
+```
+
+### Step 4: Launch the Docker Container
+Navigate to the `docker/` directory and use the following command to start the process:
 
 ```bash
 docker-compose down; cd analyzer/; make; cd ../dashboard/; make; cd ..; docker-compose up;
 ```
 
-### Step 4: Wait for Processing
-1. The process takes approximately between 3hours 30 minutes and 4hours to complete. You will see "Done" at the end of the process.
+### Step 5: Wait for Processing
+The process takes approximately between 3hours 30 minutes and 4hours to complete. You will see "Done" at the end of the process.
 
-### Step 5: Access the Dashboard
-1. Once the process is complete, go to `localhost:8050` in your web browser to see the dashboard.
+### Step 6: Access the Dashboard
+Once the process is complete, go to `localhost:8050` in your web browser to see the dashboard.
 
 ## Main Scripts
 
