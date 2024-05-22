@@ -53,7 +53,7 @@ docker-compose down; cd analyzer/; make; cd ../dashboard/; make; cd ..; docker-c
 
 ## Main Scripts
 
-### Analyzer
+### analyzer.py
 
 The analyzer script processes the raw stock data, cleans it, and stores it in the database. Key steps include:
 
@@ -75,7 +75,7 @@ The `bourse.py` script powers the dashboard. Key functionalities include:
 
 ### Additional Note
 
-- A sleep command is included in the analyzer Dockerfile to ensure the database is created before launching the analyzer.
+- A sleep command is included in the analyzer Dockerfile to ensure the database is created before launching the analyzer script.
 
 ## Conclusion
 
